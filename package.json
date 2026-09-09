@@ -9,7 +9,7 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "wrangler dev --config dist/server/wrangler.json",
-    "lint": "oxlint app lib db tests components/ui/alert.tsx components/ui/badge.tsx components/ui/button.tsx components/ui/dialog.tsx components/ui/input.tsx",
+    "lint": "oxlint app lib db tests next.config.ts vite.config.ts components/ui/alert.tsx components/ui/badge.tsx components/ui/button.tsx components/ui/dialog.tsx components/ui/input.tsx",
     "format": "oxfmt",
     "db:generate": "drizzle-kit generate",
     "keys:generate": "node scripts/generate-keys.mjs",

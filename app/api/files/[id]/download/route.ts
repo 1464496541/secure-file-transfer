@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { decryptFile } from '@/lib/crypto';
-import { ensureSchema, writeAudit } from '@/lib/database';
+import { ensureSchema, prepareAudit, writeAudit } from '@/lib/database';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,8 +43,15 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     const actualHash = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
     if (actualHash !== file.sha256) throw new Error('完整性校验失败，文件可能已被篡改。');
 
-    if (shareId) await db.prepare('UPDATE shares SET download_count = download_count + 1 WHERE id = ?').bind(shareId).run();
-    await writeAudit({ actorId: user.userId, actorEmail: user.email, action: 'DOWNLOAD', fileId: id, detail: `解密并下载文件：${file.name}` });
+    const audit = prepareAudit(db, { actorId: user.userId, actorEmail: user.email, action: 'DOWNLOAD', fileId: id, detail: `解密并下载文件：${file.name}` });
+    if (shareId) {
+      await db.batch([
+        db.prepare('UPDATE shares SET download_count = download_count + 1 WHERE id = ?').bind(shareId),
+        audit,
+      ]);
+    } else {
+      await audit.run();
+    }
     return new Response(plain, {
       headers: {
         'Content-Type': file.mimeType,
@@ -54,8 +61,11 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       },
     });
   } catch (error) {
+    console.error('SecureVault download failed.', error);
     await writeAudit({ actorId: user.userId, actorEmail: user.email, action: 'DOWNLOAD_FAILED', fileId: id, detail: `下载失败：${file.name}`, success: false }).catch(() => undefined);
-    const message = error instanceof Error ? error.message : '下载失败。';
+    const message = error instanceof Error && error.message.startsWith('完整性校验失败')
+      ? error.message
+      : '文件暂时无法解密，请稍后重试。';
     return Response.json({ error: message }, { status: 500 });
   }
 }

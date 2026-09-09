@@ -46,6 +46,10 @@ async function importPrivateKey() {
   );
 }
 
+export async function validateCryptoConfiguration() {
+  await Promise.all([importPublicKey(), importPrivateKey()]);
+}
+
 export async function encryptFile(plain: ArrayBuffer, fileId: string, ownerId: string) {
   // 每个文件都使用全新的 256 位随机 AES 密钥和 96 位随机 IV。
   const aesKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);

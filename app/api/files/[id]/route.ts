@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
-import { ensureSchema, writeAudit } from '@/lib/database';
+import { ensureSchema, prepareAudit, writeAudit } from '@/lib/database';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,8 +18,8 @@ export async function DELETE(_request: Request, context: { params: Promise<{ id:
     await db.batch([
       db.prepare('DELETE FROM shares WHERE file_id = ?').bind(id),
       db.prepare('DELETE FROM files WHERE id = ? AND owner_id = ?').bind(id, user.userId),
+      prepareAudit(db, { actorId: user.userId, actorEmail: user.email, action: 'DELETE', fileId: id, detail: `删除文件：${file.name}` }),
     ]);
-    await writeAudit({ actorId: user.userId, actorEmail: user.email, action: 'DELETE', fileId: id, detail: `删除文件：${file.name}` });
     return Response.json({ message: '文件已删除。' });
   } catch {
     await writeAudit({

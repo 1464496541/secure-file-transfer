@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { getChatGPTUser } from '@/app/chatgpt-auth';
 import { encryptFile } from '@/lib/crypto';
-import { ensureSchema, writeAudit } from '@/lib/database';
+import { ensureSchema, prepareAudit, writeAudit } from '@/lib/database';
 
 export const dynamic = 'force-dynamic';
 const MAX_FILE_SIZE = 15 * 1024 * 1024;
@@ -21,6 +21,10 @@ function normalizeFileName(value: string) {
 export async function POST(request: Request) {
   const user = await getChatGPTUser();
   if (!user) return Response.json({ error: '请先登录后上传文件。' }, { status: 401 });
+  const contentLength = Number(request.headers.get('content-length'));
+  if (Number.isFinite(contentLength) && contentLength > MAX_FILE_SIZE + 1024 * 1024) {
+    return Response.json({ error: '演示版单个文件不能超过 15 MB。' }, { status: 413 });
+  }
 
   let uploaded: File | null = null;
   try {
@@ -50,36 +54,39 @@ export async function POST(request: Request) {
     });
 
     try {
-      await db.prepare(`INSERT INTO files
-        (id, owner_id, owner_email, original_name, mime_type, size, r2_key, iv, wrapped_key, sha256, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .bind(
-          id,
-          user.userId,
-          user.email,
-          fileName,
-          normalizeMimeType(uploaded.type),
-          uploaded.size,
-          r2Key,
-          result.iv,
-          result.wrappedKey,
-          result.sha256,
-          new Date().toISOString(),
-        ).run();
+      await db.batch([
+        db.prepare(`INSERT INTO files
+          (id, owner_id, owner_email, original_name, mime_type, size, r2_key, iv, wrapped_key, sha256, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .bind(
+            id,
+            user.userId,
+            user.email,
+            fileName,
+            normalizeMimeType(uploaded.type),
+            uploaded.size,
+            r2Key,
+            result.iv,
+            result.wrappedKey,
+            result.sha256,
+            new Date().toISOString(),
+          ),
+        prepareAudit(db, {
+          actorId: user.userId,
+          actorEmail: user.email,
+          action: 'UPLOAD',
+          fileId: id,
+          detail: `上传并加密文件：${fileName}`,
+        }),
+      ]);
     } catch (error) {
       await env.FILES.delete(r2Key);
       throw error;
     }
 
-    await writeAudit({
-      actorId: user.userId,
-      actorEmail: user.email,
-      action: 'UPLOAD',
-      fileId: id,
-      detail: `上传并加密文件：${fileName}`,
-    });
     return Response.json({ id, message: '文件已加密并安全保存。', sha256: result.sha256 }, { status: 201 });
   } catch (error) {
+    console.error('SecureVault upload failed.', error);
     await writeAudit({
       actorId: user.userId,
       actorEmail: user.email,
@@ -87,7 +94,6 @@ export async function POST(request: Request) {
       detail: `上传失败：${uploaded?.name ?? '未知文件'}`,
       success: false,
     }).catch(() => undefined);
-    const message = error instanceof Error ? error.message : '文件上传失败。';
-    return Response.json({ error: message }, { status: 500 });
+    return Response.json({ error: '文件加密或保存失败，请稍后重试。' }, { status: 500 });
   }
 }

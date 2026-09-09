@@ -57,3 +57,32 @@ test('AES-GCM 会拒绝与文件身份不匹配的附加认证数据', async () 
     ),
   );
 });
+
+test('错误的 RSA 私钥无法解封文件密钥', async () => {
+  const [ownerKeys, attackerKeys] = await Promise.all([
+    crypto.subtle.generateKey(
+      { name: 'RSA-OAEP', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' },
+      false,
+      ['wrapKey', 'unwrapKey'],
+    ),
+    crypto.subtle.generateKey(
+      { name: 'RSA-OAEP', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' },
+      false,
+      ['wrapKey', 'unwrapKey'],
+    ),
+  ]);
+  const aes = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt']);
+  const wrapped = await crypto.subtle.wrapKey('raw', aes, ownerKeys.publicKey, { name: 'RSA-OAEP' });
+
+  await assert.rejects(() =>
+    crypto.subtle.unwrapKey(
+      'raw',
+      wrapped,
+      attackerKeys.privateKey,
+      { name: 'RSA-OAEP' },
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['decrypt'],
+    ),
+  );
+});

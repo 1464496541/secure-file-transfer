@@ -64,8 +64,18 @@ export async function writeAudit(input: {
   success?: boolean;
 }) {
   const db = await ensureSchema();
-  await db
-    .prepare(`INSERT INTO audit_logs
+  await prepareAudit(db, input).run();
+}
+
+export function prepareAudit(db: typeof env.DB, input: {
+  actorId: string;
+  actorEmail: string;
+  action: string;
+  fileId?: string;
+  detail: string;
+  success?: boolean;
+}) {
+  return db.prepare(`INSERT INTO audit_logs
       (id, actor_id, actor_email, action, file_id, detail, success, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
     .bind(
@@ -77,6 +87,5 @@ export async function writeAudit(input: {
       input.detail,
       input.success === false ? 0 : 1,
       new Date().toISOString(),
-    )
-    .run();
+    );
 }
