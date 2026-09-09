@@ -10,8 +10,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const { id } = await context.params;
   const body = await request.json().catch(() => ({})) as { recipientEmail?: string; expiresHours?: number };
   const recipientEmail = body.recipientEmail?.trim().toLowerCase() ?? '';
-  const expiresHours = Math.min(168, Math.max(1, Number(body.expiresHours) || 24));
+  const expiresHours = Number(body.expiresHours);
   if (!EMAIL_PATTERN.test(recipientEmail)) return Response.json({ error: '请输入有效的收件人邮箱。' }, { status: 400 });
+  if (!Number.isInteger(expiresHours) || expiresHours < 1 || expiresHours > 168) {
+    return Response.json({ error: '有效期必须是 1 至 168 之间的整数小时。' }, { status: 400 });
+  }
   if (recipientEmail === user.email.toLowerCase()) return Response.json({ error: '无需将文件共享给自己。' }, { status: 400 });
 
   const db = await ensureSchema();

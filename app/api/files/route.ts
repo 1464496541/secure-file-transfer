@@ -5,6 +5,18 @@ import { ensureSchema, writeAudit } from '@/lib/database';
 
 export const dynamic = 'force-dynamic';
 const MAX_FILE_SIZE = 15 * 1024 * 1024;
+const MAX_STORAGE_SIZE = 5 * 1024 * 1024 * 1024;
+
+function normalizeMimeType(value: string) {
+  const mimeType = value.trim().toLowerCase();
+  return /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/.test(mimeType)
+    ? mimeType.slice(0, 120)
+    : 'application/octet-stream';
+}
+
+function normalizeFileName(value: string) {
+  return value.replace(/\p{Cc}/gu, '_').trim().slice(0, 240) || 'unnamed-file';
+}
 
 export async function POST(request: Request) {
   const user = await getChatGPTUser();
@@ -19,6 +31,14 @@ export async function POST(request: Request) {
     if (uploaded.size === 0) return Response.json({ error: '不能上传空文件。' }, { status: 400 });
     if (uploaded.size > MAX_FILE_SIZE) return Response.json({ error: '演示版单个文件不能超过 15 MB。' }, { status: 413 });
 
+    const db = await ensureSchema();
+    const usage = await db.prepare('SELECT COALESCE(SUM(size), 0) AS bytes FROM files WHERE owner_id = ?')
+      .bind(user.userId).first<{ bytes: number }>();
+    if (Number(usage?.bytes ?? 0) + uploaded.size > MAX_STORAGE_SIZE) {
+      return Response.json({ error: '账户存储空间不足，请删除不再需要的文件后重试。' }, { status: 413 });
+    }
+
+    const fileName = normalizeFileName(uploaded.name);
     const id = crypto.randomUUID();
     const r2Key = `${user.userId}/${id}.svault`;
     const plain = await uploaded.arrayBuffer();
@@ -30,7 +50,6 @@ export async function POST(request: Request) {
     });
 
     try {
-      const db = await ensureSchema();
       await db.prepare(`INSERT INTO files
         (id, owner_id, owner_email, original_name, mime_type, size, r2_key, iv, wrapped_key, sha256, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -38,8 +57,8 @@ export async function POST(request: Request) {
           id,
           user.userId,
           user.email,
-          uploaded.name.slice(0, 240),
-          uploaded.type || 'application/octet-stream',
+          fileName,
+          normalizeMimeType(uploaded.type),
           uploaded.size,
           r2Key,
           result.iv,
@@ -57,7 +76,7 @@ export async function POST(request: Request) {
       actorEmail: user.email,
       action: 'UPLOAD',
       fileId: id,
-      detail: `上传并加密文件：${uploaded.name}`,
+      detail: `上传并加密文件：${fileName}`,
     });
     return Response.json({ id, message: '文件已加密并安全保存。', sha256: result.sha256 }, { status: 201 });
   } catch (error) {

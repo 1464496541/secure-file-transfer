@@ -32,3 +32,28 @@ test('AES-GCM 会拒绝被篡改的密文', async () => {
   encrypted[0] ^= 1;
   await assert.rejects(() => crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aes, encrypted));
 });
+
+test('AES-GCM 会拒绝与文件身份不匹配的附加认证数据', async () => {
+  const aes = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encrypted = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv, additionalData: encoder.encode('file-a:owner-a') },
+    aes,
+    encoder.encode('bound-to-file-and-owner'),
+  );
+
+  await assert.rejects(() =>
+    crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv, additionalData: encoder.encode('file-b:owner-a') },
+      aes,
+      encrypted,
+    ),
+  );
+  await assert.rejects(() =>
+    crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv, additionalData: encoder.encode('file-a:owner-b') },
+      aes,
+      encrypted,
+    ),
+  );
+});
