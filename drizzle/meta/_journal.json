@@ -8,6 +8,20 @@
       "when": 1788878333542,
       "tag": "0000_milky_shockwave",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1789600000000,
+      "tag": "0001_native_auth",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1789601000000,
+      "tag": "0002_oauth_login",
+      "breakpoints": true
     }
   ]
 }

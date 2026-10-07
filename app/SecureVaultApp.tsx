@@ -46,8 +46,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import LoginLogsAdmin from './LoginLogsAdmin';
 
-type View = 'dashboard' | 'files' | 'shared' | 'logs' | 'manual';
+type View = 'dashboard' | 'files' | 'shared' | 'logs' | 'login-logs' | 'manual';
 type OwnedFile = {
   id: string;
   name: string;
@@ -68,7 +69,7 @@ type OutgoingShare = {
 };
 type AuditLog = { id: string; action: string; detail: string; actorEmail: string; fileId?: string; success: number; createdAt: string };
 type DashboardData = {
-  user: { displayName: string; email: string };
+  user: { displayName: string; email: string; username?: string; role?: string };
   stats: { fileCount: number; activeShares: number; storageUsed: number };
   files: OwnedFile[];
   shared: SharedFile[];
@@ -89,7 +90,7 @@ const actionNames: Record<string, string> = {
   REVOKE_SHARE_FAILED: '撤销失败',
 };
 
-export default function SecureVaultApp({ initialName, initialEmail, signOutPath }: { initialName: string; initialEmail: string; signOutPath: string }) {
+export default function SecureVaultApp({ initialName, initialEmail, initialUsername, initialRole }: { initialName: string; initialEmail: string; initialUsername: string; initialRole: string }) {
   const [activeView, setActiveView] = useState<View>('dashboard');
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -228,14 +229,16 @@ export default function SecureVaultApp({ initialName, initialEmail, signOutPath 
 
   const displayName = data?.user.displayName || initialName;
   const email = data?.user.email || initialEmail;
+  const role = data?.user.role || initialRole;
+  const isAdmin = role === 'admin';
   const title = ({
-    dashboard: '文件安全控制台', files: '我的加密文件', shared: '共享给我的文件', logs: '安全审计日志', manual: '系统使用手册',
+    dashboard: '文件安全控制台', files: '我的加密文件', shared: '共享给我的文件', logs: '安全审计日志', 'login-logs': '登录记录', manual: '系统使用手册',
   })[activeView];
 
   return (
     <main className="min-h-screen bg-background text-foreground">
       <div className="mx-auto grid min-h-screen max-w-[1600px] lg:grid-cols-[248px_1fr]">
-        <Sidebar activeView={activeView} setActiveView={setActiveView} storageUsed={data?.stats.storageUsed ?? 0} signOutPath={signOutPath} />
+        <Sidebar activeView={activeView} setActiveView={setActiveView} storageUsed={data?.stats.storageUsed ?? 0} isAdmin={isAdmin} />
         <section className="min-w-0">
           <header className="flex min-h-20 items-center justify-between gap-4 border-b border-border/80 px-5 py-3 sm:px-8">
             <div className="flex min-w-0 items-center gap-3">
@@ -244,12 +247,12 @@ export default function SecureVaultApp({ initialName, initialEmail, signOutPath 
             </div>
             <div className="flex items-center gap-3">
               <Badge variant="outline" className="hidden border-emerald-200 bg-emerald-50 text-emerald-700 sm:inline-flex"><span className="size-1.5 rounded-full bg-emerald-500" /> 系统安全</Badge>
-              <div className="hidden text-right sm:block"><p className="max-w-44 truncate text-xs font-medium">{displayName}</p><p className="max-w-44 truncate text-[11px] text-muted-foreground">{email}</p></div>
+              <div className="hidden text-right sm:block"><p className="max-w-44 truncate text-xs font-medium">{displayName}</p><p className="max-w-44 truncate text-[11px] text-muted-foreground">{email || initialUsername}</p></div>
               <div className="grid size-9 shrink-0 place-items-center rounded-full bg-slate-900 text-sm font-semibold text-white">{displayName.slice(0, 1).toUpperCase()}</div>
             </div>
           </header>
 
-          <MobileNav activeView={activeView} setActiveView={setActiveView} />
+          <MobileNav activeView={activeView} setActiveView={setActiveView} isAdmin={isAdmin} />
 
           <div className="mx-auto max-w-7xl space-y-6 px-5 py-7 sm:px-8 sm:py-9">
             {notice && <div role={notice.type === 'error' ? 'alert' : 'status'}><Alert className={notice.type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : ''} variant={notice.type === 'error' ? 'destructive' : 'default'}>{notice.type === 'success' ? <CheckCircle2 /> : <XCircle />}<AlertTitle>{notice.type === 'success' ? '操作成功' : '操作未完成'}</AlertTitle><AlertDescription>{notice.message}</AlertDescription></Alert></div>}
@@ -259,6 +262,7 @@ export default function SecureVaultApp({ initialName, initialEmail, signOutPath 
                 {activeView === 'files' && <FileLibrary files={data?.files ?? []} outgoingShares={data?.outgoingShares ?? []} uploading={uploading} onUpload={() => inputRef.current?.click()} onShare={openShare} onDelete={(file) => setPendingAction({ kind: 'delete-file', file })} onRevoke={(share) => setPendingAction({ kind: 'revoke-share', share })} />}
                 {activeView === 'shared' && <SharedLibrary files={data?.shared ?? []} />}
                 {activeView === 'logs' && <AuditLibrary logs={data?.logs ?? []} />}
+                {activeView === 'login-logs' && isAdmin && <LoginLogsAdmin />}
                 {activeView === 'manual' && <ManualView />}
               </>
             )}
@@ -304,17 +308,35 @@ export default function SecureVaultApp({ initialName, initialEmail, signOutPath 
   );
 }
 
-function Sidebar({ activeView, setActiveView, storageUsed, signOutPath }: { activeView: View; setActiveView: (view: View) => void; storageUsed: number; signOutPath: string }) {
+function Sidebar({ activeView, setActiveView, storageUsed, isAdmin }: { activeView: View; setActiveView: (view: View) => void; storageUsed: number; isAdmin: boolean }) {
   const maxStorage = 5 * 1024 * 1024 * 1024;
   const percent = Math.min(100, Math.round(storageUsed / maxStorage * 100));
-  return <aside className="hidden border-r border-border/80 bg-sidebar px-5 py-6 lg:flex lg:flex-col"><Brand /><nav className="mt-10 space-y-1" aria-label="主导航"><NavButton icon={<LayoutDashboard />} label="控制台" view="dashboard" activeView={activeView} setActiveView={setActiveView} /><NavButton icon={<Files />} label="我的文件" view="files" activeView={activeView} setActiveView={setActiveView} /><NavButton icon={<Send />} label="共享给我" view="shared" activeView={activeView} setActiveView={setActiveView} /><NavButton icon={<Activity />} label="安全日志" view="logs" activeView={activeView} setActiveView={setActiveView} /><NavButton icon={<Menu />} label="使用手册" view="manual" activeView={activeView} setActiveView={setActiveView} /></nav><div className="mt-auto rounded-2xl border border-border bg-card p-4 shadow-sm"><div className="mb-3 flex items-center justify-between"><span className="text-sm font-medium">存储空间</span><span className="text-xs text-muted-foreground">{percent}%</span></div><progress className="sr-only" aria-label="存储空间使用率" max={100} value={percent}>{percent}%</progress><div aria-hidden="true" className="h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary" style={{ width: `${percent}%` }} /></div><p className="mt-2 text-xs text-muted-foreground">已使用 {formatSize(storageUsed)} / 5 GB</p></div><a href={signOutPath} className="mt-4 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><LogOut className="size-4" /> 退出登录</a></aside>;
+  return <aside className="hidden border-r border-border/80 bg-sidebar px-5 py-6 lg:flex lg:flex-col"><Brand /><nav className="mt-10 space-y-1" aria-label="主导航"><NavButton icon={<LayoutDashboard />} label="控制台" view="dashboard" activeView={activeView} setActiveView={setActiveView} /><NavButton icon={<Files />} label="我的文件" view="files" activeView={activeView} setActiveView={setActiveView} /><NavButton icon={<Send />} label="共享给我" view="shared" activeView={activeView} setActiveView={setActiveView} /><NavButton icon={<Activity />} label="安全日志" view="logs" activeView={activeView} setActiveView={setActiveView} />{isAdmin && <NavButton icon={<ShieldCheck />} label="登录记录" view="login-logs" activeView={activeView} setActiveView={setActiveView} />}<NavButton icon={<Menu />} label="使用手册" view="manual" activeView={activeView} setActiveView={setActiveView} /></nav><div className="mt-auto rounded-2xl border border-border bg-card p-4 shadow-sm"><div className="mb-3 flex items-center justify-between"><span className="text-sm font-medium">存储空间</span><span className="text-xs text-muted-foreground">{percent}%</span></div><progress className="sr-only" aria-label="存储空间使用率" max={100} value={percent}>{percent}%</progress><div aria-hidden="true" className="h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary" style={{ width: `${percent}%` }} /></div><p className="mt-2 text-xs text-muted-foreground">已使用 {formatSize(storageUsed)} / 5 GB</p></div><LogoutButton /></aside>;
 }
 
 function Brand() { return <div className="flex items-center gap-3 px-2"><div className="grid size-10 place-items-center rounded-xl bg-primary text-primary-foreground shadow-sm"><FolderLock className="size-5" /></div><div><p className="font-semibold tracking-tight">密盾传输</p><p className="text-xs text-muted-foreground">SecureVault</p></div></div>; }
 
 function NavButton({ icon, label, view, activeView, setActiveView }: { icon: React.ReactNode; label: string; view: View; activeView: View; setActiveView: (view: View) => void }) { const active = view === activeView; return <button type="button" aria-current={active ? 'page' : undefined} onClick={() => setActiveView(view)} className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${active ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}><span className="[&_svg]:size-4">{icon}</span>{label}</button>; }
 
-function MobileNav({ activeView, setActiveView }: { activeView: View; setActiveView: (view: View) => void }) { const items: Array<[View, string]> = [['dashboard', '控制台'], ['files', '我的文件'], ['shared', '共享'], ['logs', '日志'], ['manual', '手册']]; return <nav aria-label="移动端主导航" className="flex gap-1 overflow-x-auto border-b border-border bg-card px-4 py-2 lg:hidden">{items.map(([view, label]) => <button type="button" key={view} aria-current={activeView === view ? 'page' : undefined} onClick={() => setActiveView(view)} className={`shrink-0 rounded-lg px-3 py-2 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${activeView === view ? 'bg-primary text-white' : 'text-muted-foreground'}`}>{label}</button>)}</nav>; }
+function MobileNav({ activeView, setActiveView, isAdmin }: { activeView: View; setActiveView: (view: View) => void; isAdmin: boolean }) {
+  const items: Array<[View, string]> = [['dashboard', '控制台'], ['files', '我的文件'], ['shared', '共享'], ['logs', '日志']];
+  if (isAdmin) items.push(['login-logs', '登录']);
+  items.push(['manual', '手册']);
+  return <nav aria-label="移动端主导航" className="flex gap-1 overflow-x-auto border-b border-border bg-card px-4 py-2 lg:hidden">{items.map(([view, label]) => <button type="button" key={view} aria-current={activeView === view ? 'page' : undefined} onClick={() => setActiveView(view)} className={`shrink-0 rounded-lg px-3 py-2 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${activeView === view ? 'bg-primary text-white' : 'text-muted-foreground'}`}>{label}</button>)}</nav>;
+}
+
+function LogoutButton() {
+  const [pending, setPending] = useState(false);
+  async function logout() {
+    setPending(true);
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
+    } finally {
+      window.location.assign('/');
+    }
+  }
+  return <button type="button" disabled={pending} onClick={() => void logout()} className="mt-4 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><LogOut className="size-4" /> 退出登录</button>;
+}
 
 function Dashboard({ data, uploading, onUpload, onShare, onDelete }: { data: DashboardData | null; uploading: boolean; onUpload: () => void; onShare: (file: OwnedFile) => void; onDelete: (file: OwnedFile) => void }) {
   return <><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><p className="mb-2 text-sm font-medium text-primary">安全文件工作台</p><h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">开始一次安全传输</h1><p className="mt-2 text-sm text-muted-foreground">上传后自动完成内容加密、密钥封装与完整性摘要。</p></div><UploadButton uploading={uploading} onClick={onUpload} /></div><div className="grid gap-4 md:grid-cols-3"><StatCard icon={<Files />} label="安全文件" value={String(data?.stats.fileCount ?? 0)} note="仅文件所有者可管理" /><StatCard icon={<Send />} label="有效共享" value={String(data?.stats.activeShares ?? 0)} note="支持最长 7 天有效期" /><StatCard icon={<ShieldCheck />} label="完整性保护" value="已启用" note="AES-GCM + SHA-256 双重验证" /></div><div className="grid gap-5 xl:grid-cols-[1.35fr_.65fr]"><FilePanel title="最近文件" subtitle="最近上传的加密文件" files={(data?.files ?? []).slice(0, 5)} onShare={onShare} onDelete={onDelete} /><SecurityCard /></div></>;
@@ -330,7 +352,7 @@ function OutgoingSharesPanel({ shares, onRevoke }: { shares: OutgoingShare[]; on
   return <section className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm"><div className="border-b border-border px-5 py-4"><h2 className="font-semibold">当前有效授权 · {shares.length}</h2><p className="text-xs text-muted-foreground">查看收件人、到期时间和下载次数，可随时提前撤销</p></div>{shares.length ? <div className="divide-y divide-border">{shares.map((share) => <div key={share.id} className="grid gap-3 px-5 py-4 sm:grid-cols-[1fr_220px_160px_auto] sm:items-center"><div className="flex min-w-0 items-center gap-3"><div className="grid size-10 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-700"><UserRoundCheck className="size-5" /></div><div className="min-w-0"><p className="truncate text-sm font-medium">{share.fileName}</p><p className="truncate text-xs text-muted-foreground">已下载 {share.downloadCount} 次</p></div></div><span className="truncate text-sm text-muted-foreground">{share.recipientEmail}</span><span className="flex items-center gap-1.5 text-xs text-muted-foreground"><Clock3 className="size-3.5" />至 {formatDate(share.expiresAt)}</span><Button variant="outline" size="sm" onClick={() => onRevoke(share)}>撤销</Button></div>)}</div> : <EmptyState title="暂无有效授权" description="为文件创建共享后，可在这里统一管理。" />}</section>;
 }
 
-function ManualView() { return <><PageHeading eyebrow="快速上手" title="系统使用手册" description="从登录到安全共享，完整操作只需几步。" action={<a className={buttonVariants({ variant: 'outline' })} href="/downloads/密盾传输系统使用手册.docx" download><Download />下载 Word 手册</a>} /><div className="grid gap-5 md:grid-cols-2"><GuideCard number="01" title="登录系统" text="使用 ChatGPT 账号登录。系统以稳定用户标识和邮箱进行身份与共享权限校验。" /><GuideCard number="02" title="加密上传" text="点击“上传文件”，选择不超过 15 MB 的文件。等待提示“文件已加密并安全保存”。" /><GuideCard number="03" title="受控共享" text="填写对方登录邮箱并设置有效期；可在“当前有效授权”查看下载次数或随时撤销。" /><GuideCard number="04" title="下载校验" text="点击“下载”后，系统自动解封密钥、解密文件并核对 SHA-256；校验失败时拒绝返回文件。" /></div><section className="rounded-2xl border border-border bg-card p-6 shadow-sm"><h2 className="font-semibold">注意事项</h2><ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-6 text-muted-foreground"><li>请勿把 RSA 私钥写入源代码或发送给他人。</li><li>演示版限制单文件 15 MB、单账户总空间 5 GB。</li><li>共享必须填写对方实际登录邮箱；私密网站还要将对方加入访问名单。</li><li>撤销授权会立即阻止收件人继续下载，并写入审计日志。</li><li>删除文件会同时清理密文和共享权限，此操作不可撤销。</li></ul></section></>; }
+function ManualView() { return <><PageHeading eyebrow="快速上手" title="系统使用手册" description="从登录到安全共享，完整操作只需几步。" action={<a className={buttonVariants({ variant: 'outline' })} href="/downloads/密盾传输系统使用手册.docx" download><Download />下载 Word 手册</a>} /><div className="grid gap-5 md:grid-cols-2"><GuideCard number="01" title="登录系统" text="可用本系统账号密码登录，也可用微信扫码/微信内授权，或通过浏览器完成 GitHub 授权登录。三种方式最终都进入同一套本地会话。" /><GuideCard number="02" title="加密上传" text="点击“上传文件”，选择不超过 15 MB 的文件。等待提示“文件已加密并安全保存”。" /><GuideCard number="03" title="受控共享" text="填写对方登录邮箱并设置有效期；可在“当前有效授权”查看下载次数或随时撤销。" /><GuideCard number="04" title="下载校验" text="点击“下载”后，系统自动解封密钥、解密文件并核对 SHA-256；校验失败时拒绝返回文件。" /></div><section className="rounded-2xl border border-border bg-card p-6 shadow-sm"><h2 className="font-semibold">注意事项</h2><ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-6 text-muted-foreground"><li>请勿把 RSA 私钥写入源代码或发送给他人。</li><li>演示版限制单文件 15 MB、单账户总空间 5 GB。</li><li>共享必须填写对方实际登录邮箱。</li><li>撤销授权会立即阻止收件人继续下载，并写入审计日志。</li><li>删除文件会同时清理密文和共享权限，此操作不可撤销。</li><li>管理员可在“登录记录”中按账号、时间、IP 和状态查询登录行为，并区分账号密码、微信与浏览器授权。</li></ul></section></>; }
 
 function FilePanel({ title, subtitle, files, onShare, onDelete }: { title: string; subtitle: string; files: OwnedFile[]; onShare: (file: OwnedFile) => void; onDelete: (file: OwnedFile) => void }) { return <section className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm"><div className="border-b border-border px-5 py-4"><h2 className="font-semibold">{title}</h2><p className="text-xs text-muted-foreground">{subtitle}</p></div>{files.length ? <div className="divide-y divide-border">{files.map((file) => <div key={file.id} className="grid grid-cols-[1fr_auto] items-center gap-4 px-5 py-4 transition hover:bg-muted/45 sm:grid-cols-[1fr_90px_120px_auto]"><FileIdentity file={file} /><span className="hidden text-xs text-muted-foreground sm:block">{formatDate(file.createdAt)}</span><Badge variant="secondary" className={`hidden sm:inline-flex ${file.shareCount > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-sky-50 text-sky-700'}`}>{file.shareCount > 0 ? <Share2 /> : <LockKeyhole />}{file.shareCount > 0 ? `${file.shareCount} 个授权` : '仅自己'}</Badge><div className="flex items-center justify-end gap-1"><a className={buttonVariants({ variant: 'ghost', size: 'icon' })} href={`/api/files/${file.id}/download`} title="下载" aria-label={`下载 ${file.name}`}><Download /></a><Button size="icon" variant="ghost" title="共享" aria-label={`共享 ${file.name}`} onClick={() => onShare(file)}><Share2 /></Button><Button size="icon" variant="destructive" title="删除" aria-label={`删除 ${file.name}`} onClick={() => onDelete(file)}><Trash2 /></Button></div></div>)}</div> : <EmptyState title="还没有加密文件" description="上传一个文件开始体验混合加密传输。" />}</section>; }
 

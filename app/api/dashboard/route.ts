@@ -46,7 +46,7 @@ export async function GET() {
   const files = owned.results ?? [];
 
   return Response.json({
-    user: { displayName: user.displayName, email: user.email },
+    user: { displayName: user.displayName, email: user.email, username: user.username, role: user.role },
     stats: {
       fileCount: Number(totals?.fileCount ?? 0),
       activeShares: Number(totals?.activeShares ?? 0),
